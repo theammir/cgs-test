@@ -1,0 +1,19 @@
+[toolchain]
+package_manager = "yarn"
+
+[features]
+resolution = true
+skip-lint = false
+
+[programs.localnet]
+cgs_test = "3N6Aj5juQwPebTDtxxc38GPLo2kGeDKmzVWJqN9y2Hiv"
+
+[registry]
+url = "https://api.apr.dev"
+
+[provider]
+cluster = "localnet"
+wallet = "~/.config/solana/id.json"
+
+[scripts]
+test = "cargo test"
