@@ -17,3 +17,7 @@ solana-attestation-service-client = "1.0.9"
 borsh = "0.10"
 anyhow = "1.0"
 dotenvy = "0.15.7"
+tracing = "0.1.41"
+tracing-subscriber = { version = "0.3.20", features = ["env-filter", "json", "time"] }
+tracing-appender = "0.2.3"
+tracing-error = "0.2.1"

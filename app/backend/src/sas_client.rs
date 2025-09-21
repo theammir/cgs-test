@@ -3,6 +3,7 @@ use std::{
     error::Error,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
+use tracing::{debug, debug_span, field, warn, Instrument};
 
 use borsh::{BorshDeserialize, BorshSerialize};
 use solana_attestation_service_client::{
@@ -28,6 +29,7 @@ const CREDENTIAL_NAME: &str = "CREDENTIAL";
 const SCHEMA_NAME: &str = "VERIFICATION";
 const SCHEMA_VERSION: u8 = 1;
 const SCHEMA_DESC: &str = "{age: bool, country: bool}";
+const ATTESTATION_EXPIRY: Duration = Duration::from_secs(60 * 60 * 24 * 30);
 
 #[derive(BorshSerialize, BorshDeserialize, Clone, Debug, Default)]
 pub struct AttestationPayload {
@@ -147,9 +149,9 @@ impl AttestationService {
         Pubkey::find_program_address(
             &[
                 b"attestation",
-                &credential_pda.to_bytes(),
-                &schema_pda.to_bytes(),
-                &user.to_bytes(),
+                credential_pda.as_ref(),
+                schema_pda.as_ref(),
+                user.as_ref(),
             ],
             &SOLANA_ATTESTATION_SERVICE_ID,
         )
@@ -220,7 +222,7 @@ impl AttestationService {
         let mut data = Vec::with_capacity(2);
         payload.serialize(&mut data)?;
 
-        let expiry = (SystemTime::now() + Duration::from_secs(60 * 60 * 24 * 365))
+        let expiry = (SystemTime::now() + ATTESTATION_EXPIRY)
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs() as i64;
@@ -237,24 +239,61 @@ impl AttestationService {
             .nonce(user)
             .expiry(expiry)
             .instruction();
+        debug!(?instruction);
 
-        self.send(instruction, &[&self.signer]).await?;
+        _ = self.send(instruction, &[&self.signer]).await?;
+
         Ok(attestation_pda)
     }
 
     pub async fn fetch_user_attestation(&self, user: Pubkey) -> Result<Option<AttestationPayload>> {
         let attestation_pda = self.attestation_pda(self.cred_pda, self.schema_pda, user);
 
-        let Ok(acc) = self.rpc.get_account(&attestation_pda).await else {
+        let span = debug_span!("attestation.get", pda = %attestation_pda, success = field::Empty);
+        let Ok(acc) = self
+            .rpc
+            .get_account(&attestation_pda)
+            .instrument(span.clone())
+            .await
+        else {
+            span.record("success", true);
             return Ok(None);
         };
+        span.record("success", true);
 
-        let attestation = Attestation::from_bytes(&acc.data)
-            .map_err(|e| anyhow!("failed to parse attestation header: {e}"))?;
+        let span = debug_span!("attestation.parse.header",
+            pda = %attestation_pda,
+            owner = %acc.owner,
+            success = field::Empty
+        );
+        let attestation = match Attestation::from_bytes(&acc.data) {
+            Ok(attestation) => {
+                span.record("success", true);
+                attestation
+            }
+            Err(err) => {
+                span.record("success", false);
+                warn!(%err, "couldn't parse attestation header");
+                return Err(anyhow!("couldn't parse attestation header: {err}"));
+            }
+        };
 
-        let payload_bytes: &[u8] = &attestation.data;
-        let payload = AttestationPayload::try_from_slice(payload_bytes)
-            .map_err(|e| anyhow!("failed to decode payload: {e}"))?;
+        let span = debug_span!("attestation.parse.payload",
+            pda = %attestation_pda,
+            owner = %acc.owner,
+            success = field::Empty
+        );
+        let payload = match AttestationPayload::try_from_slice(attestation.data.as_slice()) {
+            Ok(payload) => {
+                span.record("success", true);
+                payload
+            }
+            Err(err) => {
+                span.record("success", false);
+                warn!(%err, "couldn't parse attestation header");
+                return Err(anyhow!("couldn't decode payload: {err}"));
+            }
+        };
 
         Ok(Some(payload))
     }
