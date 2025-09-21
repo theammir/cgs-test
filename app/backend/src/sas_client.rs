@@ -27,7 +27,7 @@ use solana_system_interface::program;
 
 const CREDENTIAL_NAME: &str = "CREDENTIAL";
 const SCHEMA_NAME: &str = "VERIFICATION";
-const SCHEMA_VERSION: u8 = 1;
+const SCHEMA_VERSION: u8 = 2;
 const SCHEMA_DESC: &str = "{age: bool, country: bool}";
 const ATTESTATION_EXPIRY: Duration = Duration::from_secs(60 * 60 * 24 * 30);
 
@@ -39,7 +39,7 @@ pub struct AttestationPayload {
 
 impl AttestationPayload {
     pub const fn layout() -> [u8; 2] {
-        [1, 1]
+        [10, 10]
     }
     pub const fn fields() -> [&'static str; 2] {
         ["age", "country"]
@@ -290,7 +290,7 @@ impl AttestationService {
             }
             Err(err) => {
                 span.record("success", false);
-                warn!(%err, "couldn't parse attestation header");
+                warn!(%err, "couldn't parse attestation payload");
                 return Err(anyhow!("couldn't decode payload: {err}"));
             }
         };

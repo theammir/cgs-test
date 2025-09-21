@@ -5,7 +5,7 @@ use axum::{routing::post, Json, Router};
 use serde::{Deserialize, Serialize};
 use solana_sdk::pubkey::Pubkey;
 use tokio::net::TcpListener;
-use tracing::{field, info, info_span, instrument, warn, Instrument};
+use tracing::{debug_span, field, info, instrument, warn, Instrument};
 use tracing_appender::{non_blocking::WorkerGuard, rolling};
 use tracing_error::ErrorLayer;
 use tracing_subscriber::{
@@ -52,7 +52,7 @@ struct AppState {
     pub sas: AttestationService,
 }
 
-#[instrument(name = "handlers.verification",
+#[instrument(
     skip(state),
     fields(pubkey = %payload.address))
 ]
@@ -65,7 +65,7 @@ async fn verification_handler(
         country: true,
     });
 
-    let span = info_span!("attestation.fetch",
+    let span = debug_span!("attestation.fetch",
         pubkey = %payload.address,
         success = field::Empty
     );
@@ -78,7 +78,7 @@ async fn verification_handler(
         {
             Ok(None) => {
                 span.record("success", true);
-                let span = info_span!("attestation.create",
+                let span = debug_span!("attestation.create",
                     pubkey = %payload.address,
                     success = field::Empty
                 );
