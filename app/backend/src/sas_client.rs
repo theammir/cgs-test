@@ -16,6 +16,7 @@ use solana_sdk::{
     compute_budget::ComputeBudgetInstruction,
     instruction::Instruction,
     message::Message,
+    native_token::LAMPORTS_PER_SOL,
     pubkey::Pubkey,
     signature::{read_keypair_file, Keypair, Signature},
     signer::Signer,
@@ -70,7 +71,7 @@ impl AttestationService {
     }
 
     pub async fn init(&mut self) -> Result<()> {
-        // TODO: Airdrop up to 2 SOL
+        self.airdrop_up_to(2).await?;
         if !self.account_exists(self.cred_pda).await? {
             self.create_credential().await?;
         }
@@ -153,6 +154,27 @@ impl AttestationService {
             &SOLANA_ATTESTATION_SERVICE_ID,
         )
         .0
+    }
+
+    async fn airdrop_up_to(&self, amount_sol: u32) -> Result<()> {
+        let amount_lamperts = (amount_sol as u64) * (LAMPORTS_PER_SOL);
+        let balance = self.rpc.get_balance(&self.payer.pubkey()).await?;
+        if balance >= amount_lamperts {
+            return Ok(());
+        }
+
+        let sig = self
+            .rpc
+            .request_airdrop(&self.payer.pubkey(), (amount_lamperts - balance) as u64)
+            .await?;
+        self.rpc
+            .confirm_transaction_with_spinner(
+                &sig,
+                &self.rpc.get_latest_blockhash().await?,
+                CommitmentConfig::confirmed(),
+            )
+            .await?;
+        Ok(())
     }
 
     async fn create_credential(&self) -> Result<Signature> {
