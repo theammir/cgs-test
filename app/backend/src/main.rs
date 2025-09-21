@@ -21,10 +21,6 @@ struct VerificationResponse {
     country: bool,
 }
 
-struct AppState {
-    pub sas: AttestationService,
-}
-
 impl From<sas_client::AttestationPayload> for VerificationResponse {
     fn from(value: sas_client::AttestationPayload) -> Self {
         Self {
@@ -43,6 +39,10 @@ impl From<VerificationResponse> for sas_client::AttestationPayload {
     }
 }
 
+struct AppState {
+    pub sas: AttestationService,
+}
+
 async fn verification_handler(
     Json(payload): Json<VerificationPayload>,
     state: Arc<AppState>,
@@ -54,20 +54,24 @@ async fn verification_handler(
     });
 
     match Pubkey::from_str(&payload.address) {
-        Ok(user_pubkey) => {
-            if state
-                .sas
-                .fetch_user_attestation(user_pubkey)
-                .await
-                .is_ok_and(|p| p.is_none())
-            {
+        Ok(user_pubkey) => match state.sas.fetch_user_attestation(user_pubkey).await {
+            Ok(None) => {
                 _ = state
                     .sas
                     .create_attestation(user_pubkey, verification.0.into())
                     .await;
             }
-        }
+            Ok(Some(_)) => {
+                // attestation already exists
+                todo!()
+            }
+            Err(_) => {
+                // attestation couldn't have been fetched
+                todo!()
+            }
+        },
         Err(_) => {
+            // invalid pubkey
             todo!()
         }
     }

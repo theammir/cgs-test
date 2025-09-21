@@ -1,5 +1,8 @@
 use anyhow::{anyhow, Result};
-use std::error::Error;
+use std::{
+    error::Error,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
 
 use borsh::{BorshDeserialize, BorshSerialize};
 use solana_attestation_service_client::{
@@ -67,6 +70,7 @@ impl AttestationService {
     }
 
     pub async fn init(&mut self) -> Result<()> {
+        // TODO: Airdrop up to 2 SOL
         if !self.account_exists(self.cred_pda).await? {
             self.create_credential().await?;
         }
@@ -194,6 +198,11 @@ impl AttestationService {
         let mut data = Vec::with_capacity(2);
         payload.serialize(&mut data)?;
 
+        let expiry = (SystemTime::now() + Duration::from_secs(60 * 60 * 24 * 365))
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+
         let attestation_pda = self.attestation_pda(self.cred_pda, self.schema_pda, user);
 
         let instruction = CreateAttestationBuilder::new()
@@ -204,6 +213,7 @@ impl AttestationService {
             .attestation(attestation_pda)
             .data(data)
             .nonce(user)
+            .expiry(expiry)
             .instruction();
 
         self.send(instruction, &[&self.signer]).await?;
