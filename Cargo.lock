@@ -615,15 +615,11 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "axum",
- "borsh 0.10.4",
  "dotenvy",
+ "sas_client",
  "serde",
  "serde_json",
- "solana-attestation-service-client",
- "solana-client",
- "solana-program",
  "solana-sdk",
- "solana-system-interface",
  "tokio",
  "tracing",
  "tracing-appender",
@@ -928,13 +924,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.106",
-]
-
-[[package]]
-name = "cgs-test"
-version = "0.1.0"
-dependencies = [
- "anchor-lang",
 ]
 
 [[package]]
@@ -6079,12 +6068,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "test-solana-program"
+version = "0.1.0"
+dependencies = [
+ "anchor-lang",
+ "solana-attestation-service-client",
+]
+
+[[package]]
 name = "tests"
 version = "0.1.0"
 dependencies = [
  "anchor-client",
- "cgs-test",
+ "anchor-lang",
  "sas_client",
+ "solana-attestation-service-client",
+ "test-solana-program",
  "tokio",
 ]
 

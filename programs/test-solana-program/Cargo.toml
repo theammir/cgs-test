@@ -1,12 +1,12 @@
 [package]
-name = "cgs-test"
+name = "test-solana-program"
 version = "0.1.0"
 description = "Created with Anchor"
 edition = "2021"
 
 [lib]
 crate-type = ["cdylib", "lib"]
-name = "cgs_test"
+name = "test_solana_program"
 
 [features]
 default = []
@@ -22,7 +22,10 @@ custom-panic = []
 
 [dependencies]
 anchor-lang = "0.31.1"
+solana-attestation-service-client = "1.0.9"
 
 
 [lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }
+unexpected_cfgs = { level = "warn", check-cfg = [
+	'cfg(target_os, values("solana"))',
+] }

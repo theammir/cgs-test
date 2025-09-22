@@ -11,7 +11,7 @@ use tracing::{
 
 use borsh::{BorshDeserialize, BorshSerialize};
 use solana_attestation_service_client::{
-    accounts::{Attestation, Credential},
+    accounts::Attestation,
     instructions::{CreateAttestationBuilder, CreateCredentialBuilder, CreateSchemaBuilder},
     programs::SOLANA_ATTESTATION_SERVICE_ID,
 };
@@ -33,10 +33,10 @@ use solana_sdk::{
 };
 use solana_system_interface::program;
 
-const CREDENTIAL_NAME: &str = "Test Credential";
-const SCHEMA_NAME: &str = "UserVerification";
-const SCHEMA_VERSION: u8 = 1;
-const SCHEMA_DESC: &str = "age: bool, country: bool";
+pub const CREDENTIAL_NAME: &str = "Test Credential";
+pub const SCHEMA_NAME: &str = "UserVerification";
+pub const SCHEMA_VERSION: u8 = 1;
+pub const SCHEMA_DESC: &str = "age: bool, country: bool";
 const ATTESTATION_EXPIRY: Duration = Duration::from_secs(60 * 60 * 24 * 30);
 const MIN_SOL_BALANCE: u32 = 2;
 
@@ -99,6 +99,14 @@ impl AttestationService {
         Ok(())
     }
 
+    /// [`Self::init`], but for using on a clean localnet.
+    pub async fn init_unchecked(&mut self) -> Result<()> {
+        dbg!(self.airdrop_up_to(MIN_SOL_BALANCE).await)?;
+        dbg!(self.create_credential().await)?;
+        dbg!(self.create_schema().await)?;
+        Ok(())
+    }
+
     pub fn try_from_env() -> std::result::Result<Self, Box<dyn Error>> {
         Ok(Self::new(
             &std::env::var("SAS_RPC_URL")?,
@@ -112,7 +120,6 @@ impl AttestationService {
 impl AttestationService {
     async fn account_exists(&self, pk: Pubkey) -> Result<bool> {
         let account = self.rpc.get_account(&pk).await;
-        dbg!(&account);
         Ok(match account {
             Ok(_) => true,
             Err(ClientError {
@@ -149,7 +156,7 @@ impl AttestationService {
         Ok(sig)
     }
 
-    fn credential_pda(issuer: Pubkey) -> Pubkey {
+    pub fn credential_pda(issuer: Pubkey) -> Pubkey {
         Pubkey::find_program_address(
             &[b"credential", issuer.as_ref(), CREDENTIAL_NAME.as_bytes()],
             &SOLANA_ATTESTATION_SERVICE_ID,
@@ -157,7 +164,7 @@ impl AttestationService {
         .0
     }
 
-    fn schema_pda(credential_pda: Pubkey) -> Pubkey {
+    pub fn schema_pda(credential_pda: Pubkey) -> Pubkey {
         Pubkey::find_program_address(
             &[
                 b"schema",
@@ -170,7 +177,7 @@ impl AttestationService {
         .0
     }
 
-    fn attestation_pda(&self, credential_pda: Pubkey, schema_pda: Pubkey, user: Pubkey) -> Pubkey {
+    pub fn attestation_pda(credential_pda: Pubkey, schema_pda: Pubkey, user: Pubkey) -> Pubkey {
         Pubkey::find_program_address(
             &[
                 b"attestation",
@@ -254,7 +261,7 @@ impl AttestationService {
             .unwrap()
             .as_secs() as i64;
 
-        let attestation_pda = self.attestation_pda(self.cred_pda, self.schema_pda, user);
+        let attestation_pda = Self::attestation_pda(self.cred_pda, self.schema_pda, user);
 
         let instruction = CreateAttestationBuilder::new()
             .payer(self.payer.pubkey())
@@ -274,7 +281,7 @@ impl AttestationService {
     }
 
     pub async fn fetch_attestation(&self, user: Pubkey) -> Result<Option<AttestationPayload>> {
-        let attestation_pda = self.attestation_pda(self.cred_pda, self.schema_pda, user);
+        let attestation_pda = Self::attestation_pda(self.cred_pda, self.schema_pda, user);
 
         let span = debug_span!("attestation.get", pda = %attestation_pda, success = field::Empty);
         let Ok(acc) = self

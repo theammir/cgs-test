@@ -6,7 +6,11 @@ resolution = true
 skip-lint = false
 
 [programs.localnet]
-cgs_test = "3N6Aj5juQwPebTDtxxc38GPLo2kGeDKmzVWJqN9y2Hiv"
+test_solana_program = "FSzAQ5gnGcpGTc6HoPb28JMBnVWyZ7Uj1NXZ2zrwYLyh"
+
+[[test.genesis]]
+address = "22zoJMtdu4tQc2PzL74ZUT7FrwgB1Udec8DdW4yw4BdG"
+program = "programs/sas.so"
 
 [registry]
 url = "https://api.apr.dev"
