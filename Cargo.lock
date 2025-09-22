@@ -3252,6 +3252,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "sas_client"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "borsh 0.10.4",
+ "dotenvy",
+ "solana-attestation-service-client",
+ "solana-client",
+ "solana-program",
+ "solana-sdk",
+ "solana-system-interface",
+ "tokio",
+ "tracing",
+ "tracing-appender",
+ "tracing-error",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "schannel"
 version = "0.1.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6065,6 +6084,8 @@ version = "0.1.0"
 dependencies = [
  "anchor-client",
  "cgs-test",
+ "sas_client",
+ "tokio",
 ]
 
 [[package]]

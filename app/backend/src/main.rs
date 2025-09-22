@@ -2,6 +2,7 @@ use std::{str::FromStr, sync::Arc};
 
 use anyhow::Result;
 use axum::{routing::post, Json, Router};
+use sas_client::AttestationService;
 use serde::{Deserialize, Serialize};
 use solana_sdk::pubkey::Pubkey;
 use tokio::net::TcpListener;
@@ -14,10 +15,6 @@ use tracing_subscriber::{
     util::SubscriberInitExt,
     EnvFilter,
 };
-
-use crate::sas_client::AttestationService;
-
-mod sas_client;
 
 #[derive(Debug, Deserialize, Clone)]
 struct VerificationPayload {
@@ -72,7 +69,7 @@ async fn verification_handler(
     match Pubkey::from_str(&payload.address) {
         Ok(user_pubkey) => match state
             .sas
-            .fetch_user_attestation(user_pubkey)
+            .fetch_attestation(user_pubkey)
             .instrument(span.clone())
             .await
         {

@@ -3,15 +3,23 @@ use std::{
     error::Error,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
-use tracing::{debug, debug_span, field, warn, Instrument};
+use tracing::{
+    debug, debug_span,
+    field::{self},
+    info, warn, Instrument,
+};
 
 use borsh::{BorshDeserialize, BorshSerialize};
 use solana_attestation_service_client::{
-    accounts::Attestation,
+    accounts::{Attestation, Credential},
     instructions::{CreateAttestationBuilder, CreateCredentialBuilder, CreateSchemaBuilder},
     programs::SOLANA_ATTESTATION_SERVICE_ID,
 };
-use solana_client::nonblocking::rpc_client::RpcClient;
+use solana_client::{
+    client_error::{ClientError, ClientErrorKind},
+    nonblocking::rpc_client::RpcClient,
+    rpc_request::RpcError,
+};
 use solana_sdk::{
     commitment_config::CommitmentConfig,
     compute_budget::ComputeBudgetInstruction,
@@ -25,11 +33,12 @@ use solana_sdk::{
 };
 use solana_system_interface::program;
 
-const CREDENTIAL_NAME: &str = "CREDENTIAL";
-const SCHEMA_NAME: &str = "VERIFICATION";
-const SCHEMA_VERSION: u8 = 2;
-const SCHEMA_DESC: &str = "{age: bool, country: bool}";
+const CREDENTIAL_NAME: &str = "Test Credential";
+const SCHEMA_NAME: &str = "UserVerification";
+const SCHEMA_VERSION: u8 = 1;
+const SCHEMA_DESC: &str = "age: bool, country: bool";
 const ATTESTATION_EXPIRY: Duration = Duration::from_secs(60 * 60 * 24 * 30);
+const MIN_SOL_BALANCE: u32 = 2;
 
 #[derive(BorshSerialize, BorshDeserialize, Clone, Debug, Default)]
 pub struct AttestationPayload {
@@ -73,13 +82,20 @@ impl AttestationService {
     }
 
     pub async fn init(&mut self) -> Result<()> {
-        self.airdrop_up_to(2).await?;
+        let balance = self.airdrop_up_to(MIN_SOL_BALANCE).await?;
+        debug!(
+            %balance,
+            "airdropped sol to payer if needed"
+        );
         if !self.account_exists(self.cred_pda).await? {
-            self.create_credential().await?;
+            let sig = self.create_credential().await?;
+            debug!(%sig, "created new credential");
         }
         if !self.account_exists(self.schema_pda).await? {
-            self.create_schema().await?;
+            let sig = self.create_schema().await?;
+            debug!(%sig, "created new schema");
         }
+        info!("successfully initialized attestation service");
         Ok(())
     }
 
@@ -95,7 +111,16 @@ impl AttestationService {
 
 impl AttestationService {
     async fn account_exists(&self, pk: Pubkey) -> Result<bool> {
-        Ok(self.rpc.get_account(&pk).await.is_ok())
+        let account = self.rpc.get_account(&pk).await;
+        dbg!(&account);
+        Ok(match account {
+            Ok(_) => true,
+            Err(ClientError {
+                request: _,
+                kind: ClientErrorKind::RpcError(RpcError::ForUser(_)),
+            }) => false,
+            Err(e) => Err(e)?,
+        })
     }
 
     async fn send(
@@ -158,11 +183,13 @@ impl AttestationService {
         .0
     }
 
-    async fn airdrop_up_to(&self, amount_sol: u32) -> Result<()> {
+    /// Returns factual balance in lamperts after possible airdrop,
+    /// should be no less than `amount_sol`.
+    async fn airdrop_up_to(&self, amount_sol: u32) -> Result<u64> {
         let amount_lamperts = (amount_sol as u64) * (LAMPORTS_PER_SOL);
         let balance = self.rpc.get_balance(&self.payer.pubkey()).await?;
         if balance >= amount_lamperts {
-            return Ok(());
+            return Ok(balance);
         }
 
         let sig = self
@@ -176,7 +203,7 @@ impl AttestationService {
                 CommitmentConfig::confirmed(),
             )
             .await?;
-        Ok(())
+        Ok(amount_lamperts)
     }
 
     async fn create_credential(&self) -> Result<Signature> {
@@ -246,7 +273,7 @@ impl AttestationService {
         Ok(attestation_pda)
     }
 
-    pub async fn fetch_user_attestation(&self, user: Pubkey) -> Result<Option<AttestationPayload>> {
+    pub async fn fetch_attestation(&self, user: Pubkey) -> Result<Option<AttestationPayload>> {
         let attestation_pda = self.attestation_pda(self.cred_pda, self.schema_pda, user);
 
         let span = debug_span!("attestation.get", pda = %attestation_pda, success = field::Empty);
