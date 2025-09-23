@@ -1,12 +1,15 @@
-use std::{str::FromStr, sync::Arc};
+use std::error::Error;
+use std::sync::Arc;
 
+use anchor_client::{Client, Cluster, Program};
 use anyhow::Result;
-use axum::{routing::post, Json, Router};
+use axum::{
+    routing::{get, post},
+    Router,
+};
 use sas_client::AttestationService;
-use serde::{Deserialize, Serialize};
-use solana_sdk::pubkey::Pubkey;
+use solana_sdk::signature::{read_keypair_file, Keypair};
 use tokio::net::TcpListener;
-use tracing::{debug_span, field, info, instrument, warn, Instrument};
 use tracing_appender::{non_blocking::WorkerGuard, rolling};
 use tracing_error::ErrorLayer;
 use tracing_subscriber::{
@@ -16,101 +19,31 @@ use tracing_subscriber::{
     EnvFilter,
 };
 
-#[derive(Debug, Deserialize, Clone)]
-struct VerificationPayload {
-    address: String,
-}
+mod validate;
+mod verification;
 
-#[derive(Debug, Serialize, Clone, Copy)]
-struct VerificationResponse {
-    age: bool,
-    country: bool,
-}
-
-impl From<sas_client::AttestationPayload> for VerificationResponse {
-    fn from(value: sas_client::AttestationPayload) -> Self {
-        Self {
-            age: value.age,
-            country: value.country,
-        }
-    }
-}
-
-impl From<VerificationResponse> for sas_client::AttestationPayload {
-    fn from(value: VerificationResponse) -> Self {
-        Self {
-            age: value.age,
-            country: value.country,
-        }
-    }
-}
-
-struct AppState {
+pub(crate) struct AppState {
     pub sas: AttestationService,
+    pub validate_program: Program<Arc<Keypair>>,
 }
 
-#[instrument(
-    skip(state),
-    fields(pubkey = %payload.address))
-]
-async fn verification_handler(
-    Json(payload): Json<VerificationPayload>,
-    state: Arc<AppState>,
-) -> Json<VerificationResponse> {
-    let success_response = Json(VerificationResponse {
-        age: true,
-        country: true,
-    });
-
-    let span = debug_span!("attestation.fetch",
-        pubkey = %payload.address,
-        success = field::Empty
-    );
-    match Pubkey::from_str(&payload.address) {
-        Ok(user_pubkey) => match state
-            .sas
-            .fetch_attestation(user_pubkey)
-            .instrument(span.clone())
-            .await
-        {
-            Ok(None) => {
-                span.record("success", true);
-                let span = debug_span!("attestation.create",
-                    pubkey = %payload.address,
-                    success = field::Empty
-                );
-                if let Err(err) = state
-                    .sas
-                    .create_attestation(user_pubkey, success_response.0.into())
-                    .instrument(span.clone())
-                    .await
-                {
-                    span.record("success", false);
-                    warn!(%err, "couldn't attest user")
-                } else {
-                    span.record("success", true);
-                }
-            }
-            Ok(Some(_)) => {
-                span.record("success", true);
-                info!("attestation exists, skipping");
-            }
-            Err(err) => {
-                span.record("success", false);
-                warn!(%err, "couldn't fetch attestation");
-            }
-        },
-        Err(err) => {
-            span.record("success", false);
-            warn!(pubkey = %payload.address, %err, "invalid pubkey");
-            return Json(VerificationResponse {
-                age: false,
-                country: false,
-            });
-        }
+impl AppState {
+    pub fn try_from_env(sas: AttestationService) -> std::result::Result<Self, Box<dyn Error>> {
+        let payer = read_keypair_file(std::env::var("PAYER_CREDS")?)?;
+        let client = Client::new(
+            if std::env::var("CLUSTER").is_ok_and(|cluster| cluster == "devnet") {
+                Cluster::Devnet
+            } else {
+                Cluster::Localnet
+            },
+            Arc::new(payer),
+        );
+        let program = client.program(test_solana_program::ID)?;
+        Ok(Self {
+            sas,
+            validate_program: program,
+        })
     }
-
-    success_response
 }
 
 fn init_tracing() -> (WorkerGuard, WorkerGuard) {
@@ -155,15 +88,23 @@ async fn main() -> Result<()> {
     let shared_state = {
         let mut sas = AttestationService::try_from_env().unwrap();
         sas.init().await.unwrap();
-        Arc::new(AppState { sas })
+        Arc::new(AppState::try_from_env(sas).unwrap())
     };
-    let app = Router::new().route(
-        "/verification",
-        post({
-            let state = Arc::clone(&shared_state);
-            move |payload| verification_handler(payload, state)
-        }),
-    );
+    let app = Router::new()
+        .route(
+            "/verification",
+            post({
+                let state = Arc::clone(&shared_state);
+                move |payload| verification::verification_handler(payload, state)
+            }),
+        )
+        .route(
+            "/validate",
+            get({
+                let state = Arc::clone(&shared_state);
+                move |payload| validate::validate_handler(payload, state)
+            }),
+        );
 
     let listener = TcpListener::bind("0.0.0.0:3000").await.unwrap();
     axum::serve(listener, app).await.unwrap();

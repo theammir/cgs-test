@@ -61,8 +61,8 @@ pub struct AttestationService {
     issuer: Keypair,
     signer: Keypair,
 
-    cred_pda: Pubkey,
-    schema_pda: Pubkey,
+    pub cred_pda: Pubkey,
+    pub schema_pda: Pubkey,
 }
 
 impl AttestationService {
@@ -81,6 +81,8 @@ impl AttestationService {
         }
     }
 
+    /// Airdrops some SOL to payer, so that a min threshold is passed,
+    /// and tries to create credential and schema accounts if not already present.
     pub async fn init(&mut self) -> Result<()> {
         let balance = self.airdrop_up_to(MIN_SOL_BALANCE).await?;
         debug!(
@@ -101,18 +103,18 @@ impl AttestationService {
 
     /// [`Self::init`], but for using on a clean localnet.
     pub async fn init_unchecked(&mut self) -> Result<()> {
-        dbg!(self.airdrop_up_to(MIN_SOL_BALANCE).await)?;
-        dbg!(self.create_credential().await)?;
-        dbg!(self.create_schema().await)?;
+        self.airdrop_up_to(MIN_SOL_BALANCE).await?;
+        self.create_credential().await?;
+        self.create_schema().await?;
         Ok(())
     }
 
     pub fn try_from_env() -> std::result::Result<Self, Box<dyn Error>> {
         Ok(Self::new(
-            &std::env::var("SAS_RPC_URL")?,
-            read_keypair_file(&std::env::var("SAS_PAYER_CREDS")?)?,
-            read_keypair_file(&std::env::var("SAS_ISSUER_CREDS")?)?,
-            read_keypair_file(&std::env::var("SAS_SIGNER_CREDS")?)?,
+            &std::env::var("RPC_URL")?,
+            read_keypair_file(&std::env::var("PAYER_CREDS")?)?,
+            read_keypair_file(&std::env::var("ISSUER_CREDS")?)?,
+            read_keypair_file(&std::env::var("SIGNER_CREDS")?)?,
         ))
     }
 }
@@ -156,6 +158,10 @@ impl AttestationService {
         Ok(sig)
     }
 
+    pub fn payer(&self) -> Keypair {
+        self.payer.insecure_clone() // kinda bad, but it's for a different service
+    }
+
     pub fn credential_pda(issuer: Pubkey) -> Pubkey {
         Pubkey::find_program_address(
             &[b"credential", issuer.as_ref(), CREDENTIAL_NAME.as_bytes()],
@@ -190,8 +196,8 @@ impl AttestationService {
         .0
     }
 
-    /// Returns factual balance in lamperts after possible airdrop,
-    /// should be no less than `amount_sol`.
+    /// On success, returns factual balance in lamperts after possible airdrop.
+    /// It should be no less than `amount_sol`.
     async fn airdrop_up_to(&self, amount_sol: u32) -> Result<u64> {
         let amount_lamperts = (amount_sol as u64) * (LAMPORTS_PER_SOL);
         let balance = self.rpc.get_balance(&self.payer.pubkey()).await?;

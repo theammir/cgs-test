@@ -11,7 +11,10 @@ use anchor_client::{
     },
     Client, ClientError, Cluster, Program,
 };
-use anchor_lang::{solana_program, InstructionData, ToAccountMetas};
+use anchor_lang::{
+    solana_program::{self},
+    InstructionData, ToAccountMetas,
+};
 use sas_client::{AttestationPayload, AttestationService};
 
 use test_solana_program::accounts::Validate as ValidateAccounts;
@@ -21,8 +24,8 @@ async fn init_sas() -> AttestationService {
     let anchor_wallet = std::env::var("ANCHOR_WALLET").unwrap();
 
     let payer = read_keypair_file(&anchor_wallet).unwrap();
-    let issuer = read_keypair_file(&anchor_wallet).unwrap();
-    let signer = read_keypair_file(&anchor_wallet).unwrap();
+    let issuer = payer.insecure_clone();
+    let signer = payer.insecure_clone();
     let mut service = AttestationService::new("http://127.0.0.1:8899", payer, issuer, signer);
 
     service.init_unchecked().await.unwrap();
@@ -52,23 +55,20 @@ async fn call_validate<C: Deref<Target = impl Signer> + Clone>(
     program.request().instruction(ix).send().await
 }
 
-/// I totally vibecoded it.
+/// TODO: Would be better to split test cases, but the init code would be repetitive, and I can't
+/// guard it behind OnceLock because initialization is asynchronous.
 #[tokio::test]
 async fn test_attestation() {
-    // 0) SAS init: credential + schema
     let service = init_sas().await;
 
-    // 1) Anchor program client
     let anchor_wallet = std::env::var("ANCHOR_WALLET").unwrap();
     let payer = read_keypair_file(&anchor_wallet).unwrap();
     let client = Client::new_with_options(Cluster::Localnet, &payer, CommitmentConfig::confirmed());
 
     let program = client.program(test_solana_program::ID).unwrap();
 
-    // 2) Derive SAS credential/schema PDAs
-    let issuer = payer.pubkey();
-    let cred_pda = AttestationService::credential_pda(issuer);
-    let sch_pda = AttestationService::schema_pda(cred_pda);
+    let cred_pda = service.cred_pda;
+    let scheme_pda = service.schema_pda;
 
     // Case A: valid attestation {age:true, country:true} -> should succeed
     let user_ok = Pubkey::new_unique();
@@ -82,8 +82,8 @@ async fn test_attestation() {
         )
         .await
         .expect("failed to create attestation for user_ok");
-    let att_ok = AttestationService::attestation_pda(cred_pda, sch_pda, user_ok);
-    let res_ok = call_validate(&program, att_ok, cred_pda, sch_pda, user_ok).await;
+    let att_ok = AttestationService::attestation_pda(cred_pda, scheme_pda, user_ok);
+    let res_ok = call_validate(&program, att_ok, cred_pda, scheme_pda, user_ok).await;
     assert!(
         res_ok.is_ok(),
         "validate should succeed for a valid attestation: {:?}",
@@ -92,46 +92,28 @@ async fn test_attestation() {
 
     // Case B: user without any attestation -> runtime should fail (account not found)
     let user_missing = Pubkey::new_unique();
-    let att_missing = AttestationService::attestation_pda(cred_pda, sch_pda, user_missing);
-    let res_missing = call_validate(&program, att_missing, cred_pda, sch_pda, user_missing).await;
+    let att_missing = AttestationService::attestation_pda(cred_pda, scheme_pda, user_missing);
+    let res_missing =
+        call_validate(&program, att_missing, cred_pda, scheme_pda, user_missing).await;
     assert!(
         res_missing.is_err(),
         "validate should fail when attestation account is missing"
     );
 
-    // Case C: invalid payload {age:true, country:false} -> program error (PayloadInvalid)
-    let user_bad = Pubkey::new_unique();
-    let _att_pda_bad = service
-        .create_attestation(
-            user_bad,
-            AttestationPayload {
-                age: true,
-                country: false,
-            },
-        )
-        .await
-        .expect("failed to create attestation for user_bad");
-    let att_bad = AttestationService::attestation_pda(cred_pda, sch_pda, user_bad);
-    let res_bad = call_validate(&program, att_bad, cred_pda, sch_pda, user_bad).await;
-    assert!(
-        res_bad.is_err(),
-        "validate should fail for payload {{age:true, country:false}}"
-    );
-
-    // Case D: PDA/user mismatch: pass valid attestation account but wrong user param -> error
+    // Case C: PDA/user mismatch: pass valid attestation account but wrong user param -> error
     let wrong_user = Pubkey::new_unique();
-    let res_mismatch = call_validate(&program, att_ok, cred_pda, sch_pda, wrong_user).await;
+    let res_mismatch = call_validate(&program, att_ok, cred_pda, scheme_pda, wrong_user).await;
     assert!(
         res_mismatch.is_err(),
         "validate should fail when the user param doesn't match the attestation PDA"
     );
 
-    // Case E: wrong owner: pass system_program as 'attestation' -> error (WrongOwner)
+    // Case D: wrong owner: pass system_program as 'attestation' -> error (WrongOwner)
     let res_wrong_owner = call_validate(
         &program,
         solana_program::system_program::ID,
         cred_pda,
-        sch_pda,
+        scheme_pda,
         user_ok,
     )
     .await;

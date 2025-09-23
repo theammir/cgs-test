@@ -66,7 +66,6 @@ fn validate_impl(ctx: Context<Validate>, user_wallet: Pubkey) -> Result<()> {
     require!(now < att.expiry, AttestError::Expired);
 
     // 5) Payload check: expecting exactly two bytes [1, 1]
-    // This assumes your schema layout = [1, 1] and you wrote booleans as Borsh bytes.
     let payload: &[u8] = &att.data;
     require!(payload.len() == 2, AttestError::SchemaMismatch);
     let age_true = payload[0] != 0;
@@ -78,7 +77,6 @@ fn validate_impl(ctx: Context<Validate>, user_wallet: Pubkey) -> Result<()> {
         valid,
     });
 
-    require!(valid, AttestError::PayloadInvalid);
     Ok(())
 }
 
@@ -113,6 +111,4 @@ pub enum AttestError {
     Expired,
     #[msg("Schema/payload length mismatch")]
     SchemaMismatch,
-    #[msg("Payload does not satisfy {{age:true, country:true}}")]
-    PayloadInvalid,
 }
